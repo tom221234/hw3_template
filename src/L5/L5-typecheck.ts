@@ -103,12 +103,10 @@ export const typeofPrim = (p: PrimOp): Result<TExp> =>
     (p.op === 'string=?') ? makeOk(makeProcTExp([makeStrTExp(), makeStrTExp()] , makeBoolTExp())) :
     (p.op === 'display') ? makeOk(makeProcTExp([T()] , makeVoidTExp())) :
     (p.op === 'newline') ? makeOk(makeProcTExp([] , makeVoidTExp())) :
-    (p.op === 'cons') ?
-        makeFailure("HW3 3.1 - Implement this branch") :
-    (p.op === 'car') ?
-        makeFailure("HW3 3.1 - Implement this branch") :
-    (p.op === 'cdr') ?
-        makeFailure("HW3 3.1 - Implement this branch") :
+    // HW3 3.1 - cons, car, cdr
+    (p.op === 'cons') ? (() => { const t = T(); return makeOk(makeProcTExp([t, makeListTExp(t)], makeListTExp(t))); })() :
+    (p.op === 'car') ? (() => { const t = T(); return makeOk(makeProcTExp([makeListTExp(t)], t)); })() :
+    (p.op === 'cdr') ? (() => { const t = T(); return makeOk(makeProcTExp([makeListTExp(t)], makeListTExp(t))); })() :
     makeFailure(`Primitive not yet implemented: ${p.op}`);
 
 // Purpose: compute the type of an if-exp
@@ -217,12 +215,31 @@ export const typeofLetrec = (exp: LetrecExp, tenv: TEnv): Result<TExp> => {
 //   (define (var : texp) val)
 //   If typeof(exp.val, tenv) = texp
 //   Then typeof(exp) = void
-export const typeofDefine = (exp: DefineExp, tenv: TEnv): Result<VoidTExp> =>
-    makeFailure("HW3 2.1 - Implement this function");
+// HW3 2.1
+export const typeofDefine = (exp: DefineExp, tenv: TEnv): Result<VoidTExp> => {
+    const valTE = typeofExp(exp.val, tenv);
+    const constraint = bind(valTE, (valTE: TExp) => checkEqualType(valTE, exp.var.texp, exp));
+    return bind(constraint, _ => makeOk(makeVoidTExp()));
+};
 
 // Purpose: compute the type of a program
 // Thread the TEnv through top-level expressions. A define extends the TEnv
 // for the expressions that follow it; the program type is the type of the
 // last expression.
+// HW3 2.2
 export const typeofProgram = (exp: Program, tenv: TEnv): Result<TExp> =>
-    makeFailure("HW3 2.2 - Implement this function");
+    typeofExpsInProgram(exp.exps, tenv);
+
+// Helper: thread TEnv through a sequence of top-level expressions.
+// A define extends the TEnv for subsequent expressions.
+// The program type is the type of the last expression.
+const typeofExpsInProgram = (exps: List<Exp>, tenv: TEnv): Result<TExp> =>
+    isNonEmptyList<Exp>(exps) ?
+        isEmpty(rest(exps)) ? typeofExp(first(exps), tenv) :
+        isDefineExp(first(exps)) ?
+            bind(typeofDefine(first(exps), tenv), _ =>
+                typeofExpsInProgram(rest(exps),
+                    makeExtendTEnv([first(exps).var.var], [first(exps).var.texp], tenv))) :
+            bind(typeofExp(first(exps), tenv), _ =>
+                typeofExpsInProgram(rest(exps), tenv)) :
+    makeFailure(`Unexpected empty program`);

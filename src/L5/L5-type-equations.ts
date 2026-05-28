@@ -77,10 +77,11 @@ export const expToPool = (exp: A.Exp): Pool => {
     const findVars = (e: A.Exp, pool: Pool): Pool =>
         A.isAtomicExp(e) ? extendPool(e, pool) :
         A.isProcExp(e) ? extendPool(e, reducePool(findVars, e.body, reducePoolVarDecls(extendPoolVarDecl, e.args, pool))) :
+        // HW3 3.3.a - empty and non-empty list literals
         A.isLitExp(e) && V.isEmptySExp(e.val) ?
-            pool : // HW3 3.3.a - fix this branch
+            extendPool(e, pool) :
         A.isLitExp(e) && V.isCompoundSExp(e.val) ?
-            pool : // HW3 3.3.a - fix this branch
+            extendPool(e, pool) :
         A.isCompoundExp(e) ? extendPool(e, reducePool(findVars, A.expComponents(e), pool)) :
         makeEmptyPool();
     return findVars(exp, makeEmptyPool());
@@ -118,6 +119,13 @@ export const poolToEquations = (pool: Pool): Opt.Optional<Equation[]> => {
                     (eqns: Equation[][]) => flatten(eqns));
 };
 
+// Purpose: Map a literal SExpValue to its corresponding TExp
+const literalToTExp = (val: V.SExpValue): T.TExp =>
+    isNumber(val) ? T.makeNumTExp() :
+    isBoolean(val) ? T.makeBoolTExp() :
+    isString(val) ? T.makeStrTExp() :
+    T.makeFreshTVar();
+
 // Signature: make-equation-from-exp(exp, pool)
 // Purpose: Return a single equation
 // @Pre: exp is a member of pool
@@ -138,10 +146,23 @@ export const makeEquationsFromExp = (exp: A.Exp, pool: Pool): Opt.Optional<Equat
                             Opt.mapv(Opt.bind(safeLast(exp.body), (last: A.CExp) => inPool(pool, last)), (ret: T.TExp) =>
                                 [makeEquation(left, T.makeProcTExp(R.map((vd) => vd. texp, exp.args), ret))])) :
     A.isLitExp(exp) ?
+        // HW3 3.3.b - empty and non-empty list literals
         (V.isEmptySExp(exp.val) ?
-            Opt.makeNone() : // HW3 3.3.b - fix this branch
+            Opt.mapv(inPool(pool, exp), (left: T.TExp) =>
+                [makeEquation(left, T.makeListTExp(T.makeFreshTVar()))]) :
         V.isCompoundSExp(exp.val) ?
-            Opt.makeNone() : // HW3 3.3.b - fix this branch
+            Opt.mapv(inPool(pool, exp), (left: T.TExp) => {
+                const tItem = T.makeFreshTVar();
+                const eqs: Equation[] = [makeEquation(left, T.makeListTExp(tItem))];
+                const collectEqs = (sexp: V.SExpValue): void => {
+                    if (V.isCompoundSExp(sexp)) {
+                        eqs.push(makeEquation(tItem, literalToTExp(sexp.val1)));
+                        collectEqs(sexp.val2);
+                    }
+                };
+                collectEqs(exp.val);
+                return eqs;
+            }) :
         isNumber(exp.val) ? Opt.mapv(inPool(pool, exp) , (left: T.TExp) =>
             [ makeEquation(left, T.makeNumTExp()) ]) :
         isBoolean(exp.val) ? Opt.mapv(inPool(pool, exp) , (left: T.TExp) =>
@@ -244,7 +265,7 @@ const solve = (equations: Equation[], sub: S.Sub): Res.Result<S.Sub> => {
 const canUnify = (eq: Equation): boolean =>
     T.isProcTExp(eq.left) && T.isProcTExp(eq.right) ?
         (eq.left.paramTEs.length === eq.right.paramTEs.length) :
-    // HW3 3.3.c - add missing branch
+    T.isListTExp(eq.left) && T.isListTExp(eq.right) ? true : // HW3 3.3.c
     false;
 
 // Signature: splitEquation(equation)
@@ -262,5 +283,7 @@ const splitEquation = (eq: Equation): Equation[] =>
         R.zipWith(makeEquation,
                   cons(eq.left.returnTE, eq.left.paramTEs),
                   cons(eq.right.returnTE, eq.right.paramTEs)) :
-    // HW3 3.3.d - add missing branch
+    // HW3 3.3.d
+    (T.isListTExp(eq.left) && T.isListTExp(eq.right)) ?
+        [makeEquation(eq.left.itemTE, eq.right.itemTE)] :
     [];
