@@ -233,13 +233,22 @@ export const typeofProgram = (exp: Program, tenv: TEnv): Result<TExp> =>
 // Helper: thread TEnv through a sequence of top-level expressions.
 // A define extends the TEnv for subsequent expressions.
 // The program type is the type of the last expression.
-const typeofExpsInProgram = (exps: List<Exp>, tenv: TEnv): Result<TExp> =>
-    isNonEmptyList<Exp>(exps) ?
-        isEmpty(rest(exps)) ? typeofExp(first(exps), tenv) :
-        isDefineExp(first(exps)) ?
-            bind(typeofDefine(first(exps), tenv), _ =>
-                typeofExpsInProgram(rest(exps),
-                    makeExtendTEnv([first(exps).var.var], [first(exps).var.texp], tenv))) :
-            bind(typeofExp(first(exps), tenv), _ =>
-                typeofExpsInProgram(rest(exps), tenv)) :
-    makeFailure(`Unexpected empty program`);
+const typeofExpsInProgram = (exps: List<Exp>, tenv: TEnv): Result<TExp> => {
+    if (!isNonEmptyList<Exp>(exps)) {
+        return makeFailure(`Unexpected empty program`);
+    }
+
+    const exp = first(exps);
+    const remainingExps = rest(exps);
+
+    if (isEmpty(remainingExps)) {
+        return typeofExp(exp, tenv);
+    }
+
+    if (isDefineExp(exp)) {
+        const extTEnv = makeExtendTEnv([exp.var.var], [exp.var.texp], tenv);
+        return bind(typeofDefine(exp, tenv), _ => typeofExpsInProgram(remainingExps, extTEnv));
+    }
+
+    return bind(typeofExp(exp, tenv), _ => typeofExpsInProgram(remainingExps, tenv));
+};

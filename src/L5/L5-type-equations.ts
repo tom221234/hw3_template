@@ -119,12 +119,44 @@ export const poolToEquations = (pool: Pool): Opt.Optional<Equation[]> => {
                     (eqns: Equation[][]) => flatten(eqns));
 };
 
-// Purpose: Map a literal SExpValue to its corresponding TExp
-const literalToTExp = (val: V.SExpValue): T.TExp =>
-    isNumber(val) ? T.makeNumTExp() :
-    isBoolean(val) ? T.makeBoolTExp() :
-    isString(val) ? T.makeStrTExp() :
-    T.makeFreshTVar();
+type LiteralTypeInfo = { te: T.TExp; equations: Equation[] };
+
+const improperListEquations = (): Equation[] =>
+    [makeEquation(T.makeNumTExp(), T.makeBoolTExp())];
+
+// Purpose: Map a literal SExpValue to its corresponding TExp and supporting equations.
+const literalToTExpInfo = (val: V.SExpValue): LiteralTypeInfo =>
+    isNumber(val) ? { te: T.makeNumTExp(), equations: [] } :
+    isBoolean(val) ? { te: T.makeBoolTExp(), equations: [] } :
+    isString(val) ? { te: T.makeStrTExp(), equations: [] } :
+    V.isEmptySExp(val) ? { te: T.makeListTExp(T.makeFreshTVar()), equations: [] } :
+    V.isCompoundSExp(val) ? compoundSExpToTExpInfo(val) :
+    { te: T.makeFreshTVar(), equations: [] };
+
+const compoundSExpToTExpInfo = (val: V.CompoundSExp): LiteralTypeInfo => {
+    const itemTE = T.makeFreshTVar();
+    return {
+        te: T.makeListTExp(itemTE),
+        equations: listValueEquations(val, itemTE)
+    };
+};
+
+const listValueEquations = (val: V.SExpValue, itemTE: T.TExp): Equation[] => {
+    if (V.isEmptySExp(val)) {
+        return [];
+    }
+
+    if (!V.isCompoundSExp(val)) {
+        return improperListEquations();
+    }
+
+    const headInfo = literalToTExpInfo(val.val1);
+    return [
+        ...headInfo.equations,
+        makeEquation(headInfo.te, itemTE),
+        ...listValueEquations(val.val2, itemTE)
+    ];
+};
 
 // Signature: make-equation-from-exp(exp, pool)
 // Purpose: Return a single equation
@@ -152,16 +184,8 @@ export const makeEquationsFromExp = (exp: A.Exp, pool: Pool): Opt.Optional<Equat
                 [makeEquation(left, T.makeListTExp(T.makeFreshTVar()))]) :
         V.isCompoundSExp(exp.val) ?
             Opt.mapv(inPool(pool, exp), (left: T.TExp) => {
-                const tItem = T.makeFreshTVar();
-                const eqs: Equation[] = [makeEquation(left, T.makeListTExp(tItem))];
-                const collectEqs = (sexp: V.SExpValue): void => {
-                    if (V.isCompoundSExp(sexp)) {
-                        eqs.push(makeEquation(tItem, literalToTExp(sexp.val1)));
-                        collectEqs(sexp.val2);
-                    }
-                };
-                collectEqs(exp.val);
-                return eqs;
+                const literalInfo = literalToTExpInfo(exp.val);
+                return [makeEquation(left, literalInfo.te), ...literalInfo.equations];
             }) :
         isNumber(exp.val) ? Opt.mapv(inPool(pool, exp) , (left: T.TExp) =>
             [ makeEquation(left, T.makeNumTExp()) ]) :
